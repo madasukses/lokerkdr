@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Downloader IG & TikTok</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --line:#262b36; --text:#e8eaf0;
+    --muted:#9aa3b2; --accent:#6c5ce7; --accent2:#00cfc8; --danger:#ff6b6b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%,#1b2030,#0f1115);
+    color:var(--text);min-height:100vh;display:flex;align-items:center;
+    justify-content:center;padding:20px;
+  }
+  .wrap{width:100%;max-width:560px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:26px 22px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  h1{font-size:20px;font-weight:700;text-align:center}
+  .sub{color:var(--muted);font-size:13px;text-align:center;margin:6px 0 20px}
+  .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;
+    background:#20242e;color:var(--muted);border:1px solid var(--line);margin:0 3px}
+  .inputrow{display:flex;gap:8px}
+  input{flex:1;background:#0e1016;border:1px solid var(--line);color:var(--text);
+    padding:14px 14px;border-radius:12px;font-size:14px;outline:none}
+  input:focus{border-color:var(--accent)}
+  button{cursor:pointer;border:none;border-radius:12px;font-size:14px;font-weight:600}
+  .go{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+    padding:0 20px}
+  .go:disabled{opacity:.6;cursor:not-allowed}
+  .paste{background:#20242e;color:var(--muted);border:1px solid var(--line);padding:0 14px}
+  .msg{margin-top:14px;font-size:13px;color:var(--muted);text-align:center;min-height:18px}
+  .msg.err{color:var(--danger)}
+  .result{margin-top:20px;display:none}
+  .preview{display:flex;gap:14px;align-items:center;background:#0e1016;
+    border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:14px}
+  .preview img{width:64px;height:64px;object-fit:cover;border-radius:10px;flex:none;background:#000}
+  .preview .t{font-size:13px;line-height:1.35;max-height:54px;overflow:hidden}
+  .preview .a{color:var(--muted);font-size:12px;margin-top:2px}
+  .dls{display:flex;flex-direction:column;gap:10px}
+  .dl{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:#0e1016;border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;color:var(--text);text-decoration:none;transition:.15s}
+  .dl:hover{border-color:var(--accent);background:#141821}
+  .dl .lbl{font-size:14px;font-weight:600}
+  .dl .k{font-size:11px;color:var(--muted)}
+  .dl .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+    font-size:16px;flex:none}
+  .spin{width:18px;height:18px;border:2px solid #ffffff55;border-top-color:#fff;
+    border-radius:50%;display:inline-block;animation:s .7s linear infinite;vertical-align:-3px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .foot{color:var(--muted);font-size:11px;text-align:center;margin-top:18px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>⬇️ Downloader Media</h1>
+    <div class="sub">
+      <span class="badge">TikTok</span><span class="badge">Instagram</span><br/>
+      Tempel link, klik proses, lalu unduh. Hanya untuk konten publik.
+    </div>
+
+    <div class="inputrow">
+      <input id="url" type="text" placeholder="Tempel link TikTok / Instagram di sini…" autocomplete="off" />
+      <button class="paste" id="pasteBtn" title="Tempel dari clipboard">📋</button>
+      <button class="go" id="goBtn">Proses</button>
+    </div>
+
+    <div class="msg" id="msg"></div>
+
+    <div class="result" id="result">
+      <div class="preview" id="preview">
+        <img id="thumb" alt="" />
+        <div>
+          <div class="t" id="title"></div>
+          <div class="a" id="author"></div>
+        </div>
+      </div>
+      <div class="dls" id="dls"></div>
+    </div>
+
+    <div class="foot">
+      Gunakan hanya untuk konten milik sendiri atau yang Anda punya izinnya.<br/>
+      Menghormati hak cipta & Ketentuan Layanan TikTok/Instagram adalah tanggung jawab pengguna.
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const urlEl = $("url"), goBtn = $("goBtn"), msg = $("msg"), result = $("result");
+
+$("pasteBtn").onclick = async () => {
+  try { urlEl.value = (await navigator.clipboard.readText()).trim(); }
+  catch { setMsg("Tidak bisa akses clipboard, tempel manual ya.", false); }
+};
+
+urlEl.addEventListener("keydown", (e) => { if (e.key === "Enter") process(); });
+goBtn.onclick = process;
+
+function setMsg(t, isErr){ msg.textContent = t; msg.className = "msg" + (isErr ? " err" : ""); }
+
+async function process(){
+  const url = urlEl.value.trim();
+  result.style.display = "none";
+  if(!url){ setMsg("Tempel link dulu ya.", true); return; }
+
+  goBtn.disabled = true;
+  goBtn.innerHTML = '<span class="spin"></span>';
+  setMsg("Sedang mengambil data…", false);
+
+  try{
+    const r = await fetch("/api/download", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ url })
+    });
+    const data = await r.json();
+
+    if(!data.ok){ setMsg(data.error || "Gagal memproses.", true); return; }
+    render(data);
+    setMsg("", false);
+  }catch(err){
+    setMsg("Jaringan/server bermasalah. Coba lagi. ("+err.message+")", true);
+  }finally{
+    goBtn.disabled = false;
+    goBtn.textContent = "Proses";
+  }
+}
+
+function render(data){
+  $("thumb").src = data.thumbnail || "";
+  $("thumb").style.display = data.thumbnail ? "block" : "none";
+  $("title").textContent = data.title || "";
+  $("author").textContent = data.author ? "oleh " + data.author : "";
+
+  const box = $("dls");
+  box.innerHTML = "";
+  (data.medias || []).forEach((m, i) => {
+    const a = document.createElement("a");
+    a.className = "dl";
+    a.href = "/api/file?u=" + encodeURIComponent(m.url) +
+             "&name=" + encodeURIComponent(safeName(data, m, i));
+    a.setAttribute("download", "");
+    a.innerHTML =
+      '<div style="display:flex;align-items:center;gap:12px">' +
+        '<span class="ic">'+ (m.kind==="audio"?"♪":m.kind==="image"?"🖼":"⯈") +'</span>' +
+        '<span><span class="lbl">'+ m.label +'</span><br>' +
+        '<span class="k">.'+ m.ext +'</span></span>' +
+      '</div><span class="k">Unduh ⬇</span>';
+    box.appendChild(a);
+  });
+
+  result.style.display = "block";
+}
+
+function safeName(data, m, i){
+  const base = (data.platform || "media") + "_" +
+    (data.title || "file").replace(/[^\w\d]+/g,"_").slice(0,40);
+  return base + "_" + (i+1) + "." + m.ext;
+}
+</script>
+</body>
+</html>
