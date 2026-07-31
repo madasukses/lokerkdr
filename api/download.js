@@ -121,6 +121,45 @@ function unesc(s) {
     .replace(/&amp;/g, "&");
 }
 
+// shortcode IG -> media_id (base64 dengan alfabet IG)
+const IG_ALPHA =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+function shortcodeToId(sc) {
+  let id = 0n;
+  for (const ch of sc) {
+    const v = IG_ALPHA.indexOf(ch);
+    if (v === -1) return null;
+    id = id * 64n + BigInt(v);
+  }
+  return id.toString();
+}
+
+// ambil media dari satu "item" respons api/v1
+function pushFromItem(item, medias) {
+  const addNode = (node) => {
+    if (node.video_versions && node.video_versions.length) {
+      medias.push({
+        label: "Video (MP4)",
+        url: node.video_versions[0].url,
+        ext: "mp4",
+        kind: "video",
+      });
+    } else if (node.image_versions2?.candidates?.length) {
+      medias.push({
+        label: "Foto (JPG)",
+        url: node.image_versions2.candidates[0].url,
+        ext: "jpg",
+        kind: "image",
+      });
+    }
+  };
+  if (Array.isArray(item.carousel_media) && item.carousel_media.length) {
+    item.carousel_media.forEach((n) => addNode(n));
+  } else {
+    addNode(item);
+  }
+}
+
 async function resolveInstagram(url) {
   const code = igShortcode(url);
   if (!code)
@@ -129,43 +168,69 @@ async function resolveInstagram(url) {
   const medias = [];
   let thumbnail = "";
   let title = "Konten Instagram";
+  let author = "";
 
-  // Sumber yang dicoba berurutan (halaman embed & halaman post publik)
-  const sources = [
-    `https://www.instagram.com/reel/${code}/embed/captioned/`,
-    `https://www.instagram.com/p/${code}/embed/captioned/`,
-    `https://www.instagram.com/p/${code}/`,
-  ];
-
-  for (const src of sources) {
-    let html = "";
-    try {
-      html = await fetchText(src);
-    } catch {
-      continue;
+  // --- Metode utama: media_id -> endpoint api/v1/media/info (App-ID publik) ---
+  const mediaId = shortcodeToId(code);
+  if (mediaId) {
+    const infoUrls = [
+      `https://www.instagram.com/api/v1/media/${mediaId}/info/`,
+      `https://i.instagram.com/api/v1/media/${mediaId}/info/`,
+    ];
+    for (const iu of infoUrls) {
+      try {
+        const r = await fetch(iu, {
+          headers: {
+            "User-Agent": UA,
+            "X-IG-App-ID": "936619743392459",
+            Accept: "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const item = j?.items?.[0];
+        if (!item) continue;
+        title = item.caption?.text?.slice(0, 120) || title;
+        author = item.user?.username || "";
+        thumbnail = item.image_versions2?.candidates?.[0]?.url || thumbnail;
+        pushFromItem(item, medias);
+        if (medias.length) break;
+      } catch {
+        /* lanjut ke sumber berikutnya */
+      }
     }
+  }
 
-    // Kumpulkan semua video_url & display_url yang muncul di JSON tertanam
-    const videos = [...html.matchAll(/"video_url":"([^"]+)"/g)].map((m) => unesc(m[1]));
-    const images = [...html.matchAll(/"display_url":"([^"]+)"/g)].map((m) => unesc(m[1]));
-    const thumbs = [...html.matchAll(/"display_resources".*?"src":"([^"]+)"/g)].map((m) => unesc(m[1]));
-
-    const uniq = (arr) => [...new Set(arr)].filter((x) => x && x.startsWith("http"));
-    const vids = uniq(videos);
-    const imgs = uniq(images);
-
-    if (vids.length || imgs.length) {
-      vids.forEach((v, i) =>
-        medias.push({ label: vids.length > 1 ? `Video ${i + 1}` : "Video (MP4)", url: v, ext: "mp4", kind: "video" })
-      );
-      // hanya tambahkan gambar kalau tidak ada video (post foto / carousel)
-      if (!vids.length) {
+  // --- Cadangan: parsing halaman embed (kalau metode utama gagal) ---
+  if (!medias.length) {
+    const sources = [
+      `https://www.instagram.com/reel/${code}/embed/captioned/`,
+      `https://www.instagram.com/p/${code}/embed/captioned/`,
+    ];
+    for (const src of sources) {
+      let html = "";
+      try {
+        html = await fetchText(src);
+      } catch {
+        continue;
+      }
+      const uniq = (arr) => [...new Set(arr)].filter((x) => x && x.startsWith("http"));
+      const vids = uniq([...html.matchAll(/"video_url":"([^"]+)"/g)].map((m) => unesc(m[1])));
+      const imgs = uniq([...html.matchAll(/"display_url":"([^"]+)"/g)].map((m) => unesc(m[1])));
+      if (vids.length) {
+        vids.forEach((v, i) =>
+          medias.push({ label: vids.length > 1 ? `Video ${i + 1}` : "Video (MP4)", url: v, ext: "mp4", kind: "video" })
+        );
+      } else if (imgs.length) {
         imgs.forEach((im, i) =>
           medias.push({ label: imgs.length > 1 ? `Foto ${i + 1}` : "Foto (JPG)", url: im, ext: "jpg", kind: "image" })
         );
       }
-      thumbnail = (thumbs[0] || imgs[0] || "") || thumbnail;
-      break;
+      if (medias.length) {
+        thumbnail = thumbnail || imgs[0] || "";
+        break;
+      }
     }
   }
 
@@ -173,8 +238,12 @@ async function resolveInstagram(url) {
     return {
       ok: false,
       error:
-        "Tidak bisa mengambil media Instagram. Pastikan akun/post PUBLIK. IG sering mengubah struktur — bagian ini mungkin perlu update.",
+        "Tidak bisa mengambil media Instagram. Pastikan post PUBLIK (bukan akun privat/Story). Jika tetap gagal, IG mungkin memblokir server — coba lagi nanti.",
     };
 
-  return { ok: true, platform: "instagram", title, author: "", thumbnail, medias };
+  // beri nomor label kalau carousel (banyak media campur)
+  if (medias.length > 1)
+    medias.forEach((m, i) => (m.label = `${m.kind === "video" ? "Video" : "Foto"} ${i + 1}`));
+
+  return { ok: true, platform: "instagram", title, author, thumbnail, medias };
 }
