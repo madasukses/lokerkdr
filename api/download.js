@@ -171,6 +171,11 @@ async function resolveInstagram(url) {
   let author = "";
 
   // --- Metode utama: media_id -> endpoint api/v1/media/info (App-ID publik) ---
+  // IG memblokir IP datacenter tanpa sesi. Sertakan cookie akun (env var) bila ada.
+  const igSession = process.env.IG_SESSIONID || "";
+  const igCookie = process.env.IG_COOKIE || (igSession ? `sessionid=${igSession};` : "");
+  let loginBlocked = false;
+
   const mediaId = shortcodeToId(code);
   if (mediaId) {
     const infoUrls = [
@@ -179,16 +184,20 @@ async function resolveInstagram(url) {
     ];
     for (const iu of infoUrls) {
       try {
-        const r = await fetch(iu, {
-          headers: {
-            "User-Agent": UA,
-            "X-IG-App-ID": "936619743392459",
-            Accept: "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-          },
-        });
+        const headers = {
+          "User-Agent": UA,
+          "X-IG-App-ID": "936619743392459",
+          Accept: "*/*",
+          "Accept-Language": "en-US,en;q=0.9",
+        };
+        if (igCookie) headers.Cookie = igCookie;
+        const r = await fetch(iu, { headers });
+        const j = await r.json().catch(() => ({}));
+        if (j?.message === "login_required" || j?.require_login || r.status === 401 || r.status === 403) {
+          loginBlocked = true;
+          continue;
+        }
         if (!r.ok) continue;
-        const j = await r.json();
         const item = j?.items?.[0];
         if (!item) continue;
         title = item.caption?.text?.slice(0, 120) || title;
@@ -237,8 +246,9 @@ async function resolveInstagram(url) {
   if (!medias.length)
     return {
       ok: false,
-      error:
-        "Tidak bisa mengambil media Instagram. Pastikan post PUBLIK (bukan akun privat/Story). Jika tetap gagal, IG mungkin memblokir server — coba lagi nanti.",
+      error: loginBlocked
+        ? "Instagram menolak permintaan dari server (login_required). Setel environment variable IG_SESSIONID di Vercel dengan cookie 'sessionid' akun IG cadangan, lalu redeploy."
+        : "Tidak bisa mengambil media. Pastikan post PUBLIK (bukan akun privat/Story). Kalau tetap gagal, IG mungkin memblokir IP server — coba lagi nanti.",
     };
 
   // beri nomor label kalau carousel (banyak media campur)
